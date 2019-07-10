@@ -7,7 +7,8 @@
     "test": "jest --config jestconfig.json",
     "format": "prettier --write \"src/**/*.ts\" \"src/**/*.js\"",
     "lint": "tslint -p tsconfig.json",
-    "build": "tsc"
+    "build": "tsc",
+    "exec": "npm run build; node lib/index.js "
   },
   "repository": {
     "type": "git",
@@ -31,5 +32,11 @@
     "tslint": "^5.18.0",
     "tslint-config-prettier": "^1.18.0",
     "typescript": "^3.5.3"
+  },
+  "dependencies": {
+    "@types/node": "^12.6.2",
+    "@types/uuid": "^3.4.5",
+    "googleapis": "^40.0.1",
+    "pdf-parse": "^1.1.1"
   }
 }
