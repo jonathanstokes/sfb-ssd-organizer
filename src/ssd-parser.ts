@@ -46,6 +46,12 @@ export class SsdParser {
         /WARP/i,
         /Copyright\s+\d{4}/i,
         /CREW/i,
+        /MOVEMENT\s+COST/i,
+        /\s+#\s+/i,
+        /\s+\*\s+/i,
+        /\s+\d\s+/i,
+        /BRIDGE/i,
+        /CNTR/i,
     ];
 
     protected static RACE_NAMES = [
@@ -63,10 +69,53 @@ export class SsdParser {
         'ANDROMEDAN',
     ];
 
+    /** Used to correct names commonly misread by OCR. */
+    protected static MISREAD_RACE_NAMES: { [correctName: string]: (string | RegExp)[]} = {
+        'THOLIAN': ['THOLIFIN', 'THOLIRN', /THOL\s+IAN/, /THOLI\s+AN/, 'TIHOLIRN', 'THOILIRN'],
+        'HYDRAN': ['HYDRFIN', 'HYDRRN', 'HYORRN'],
+        'ROMULAN': ['ROMULRN', 'ROMULFIN', 'ROMIARN', 'ROMUILAN', 'REIMULFIN'],
+        'ANDROMEDAN': ['RNDROMEDRN', 'RNOROMEORN', 'ANDROMEOFIN', 'ANDROMEDFIN', 'ANDROMERN', 'FINDROMEDFIN', 'RNBROMEORN', 'FINDROMEDAN', 'FINDROMEOFIN', 'ANDROMEIORN'],
+        'LYRAN': ['LYRRN', 'LYRFIN', 'LYFIFIN', 'LYRF1N', 'LYMAN'],
+        'FEDERATION': ['FEDERFITION', 'FEDERRTION', 'FEDEFIRTION'],
+        'KLINGON': ['KILINGON'],
+        'GORN': ['GOAN'],
+        'KZINTI': ['KZINT1'],
+    };
+
+    /**
+     * Used for further corrections, only when MISREAD_RACE_NAMES alone did not yeild results.
+     *
+     * These corrections, applied too soon, could cause true values to be overlooked, so it should only be applied when
+     * absolutely necessary.
+     */
+    protected static REALLY_MISREAD_RACE_NAMES: { [correctName: string]: (string | RegExp)[]} = {
+        'HYDRAN': ['11-1YDRAN', 'HYMAN', 'I-IYDRRN', 'HIYEIFIRN', '1-1YDRAN'],
+        'KLINGON': [/KL\s+I\s+NGON/],
+        'THOLIAN': [/THOL\s+I\s+AN/],
+        'ISC': [/I\s+SC/, '(SC', '1SC', '!SC', 'ISIC'],
+        'GORN': ['BORN'],
+    };
+
     protected rawText: string;
 
     constructor(text: string) {
         this.rawText = text;
+    }
+
+    /** Corrects race names that are commonly read incorrectly by OCR. */
+    correctMisspelledRaces(text: string, desperate: boolean = false): string {
+        const corrections = desperate ? SsdParser.REALLY_MISREAD_RACE_NAMES : SsdParser.MISREAD_RACE_NAMES;
+        let output = text;
+        for (const correctVersion of Object.keys(corrections)) {
+            for (const incorrectVersion of corrections[correctVersion]) {
+                output = output.replace(incorrectVersion, correctVersion);
+                if (typeof incorrectVersion === 'string') {
+                    output = output.replace((incorrectVersion as string).toLowerCase(), correctVersion.toLowerCase());
+                    output = output.replace(this.toTitleCase(incorrectVersion as string), this.toTitleCase(correctVersion));
+                }
+            }
+        }
+        return output;
     }
 
     findBpv(): string | undefined {
@@ -93,23 +142,26 @@ export class SsdParser {
         return undefined;
     }
 
-    findShipName(): string {
+    findShipName(desperattionLevel: number = 0): string {
         const raceRegex = new RegExp(`(${SsdParser.RACE_NAMES.join('|')}|${SsdParser.RACE_NAMES.map(v => v === 'ISC' ? 'ISC' : this.toTitleCase(v)).join('|')})`, 'g');
-        const result = raceRegex.exec(this.rawText);
+        const correctedRawText = this.correctMisspelledRaces(this.rawText, !!desperattionLevel);
+        const result = raceRegex.exec(correctedRawText);
+        /*-* / if (desperattionLevel) console.log("result=", result); /*+*/
         if (result) {
-            const searchText = this.rawText.substring(result.index);
+            const searchText = correctedRawText.substring(result.index);
             const stopIndex = this.findStopWordIndex(searchText);
             const rawName = searchText.substring(0, stopIndex);
+            /*-* /if (desperattionLevel) console.log("rawName=", rawName); /*+*/
             const allUpperName = rawName.replace(/\s{2}/g, ' ').trim();
             const titleCaseName = this.toTitleCase(allUpperName);
-            if (titleCaseName.length <= 50) {
+            if (titleCaseName.length <= 60) {
                 return titleCaseName;
             } else {
                 throw new Error(`Name '${titleCaseName}' is too long.`);
             }
         }
-        //throw new Error(`\n*****\nNo name found within text:\n${this.rawText}\n*****`);
-        throw new Error(`No name found.`);
+        throw new Error(`\n*****\nNo name found within text:\n${correctedRawText}\n*****`);
+        //throw new Error(`No name found.`);
     }
 
     findStopWordIndex(text: string): number {
@@ -124,8 +176,24 @@ export class SsdParser {
     }
 
     parseMetadata(): SsdMetadata {
+        let shipName: string;
+        try {
+            shipName = this.findShipName();
+        } catch (err1) {
+            try {
+                shipName = this.findShipName(1);
+            } catch (err2) {
+                err1.metadata = {
+                    type: this.findShipType(),
+                    bpv: this.findBpv(),
+                    reference: this.findReference(),
+                };
+                throw err1;
+            }
+        }
+
         return {
-            name: this.findShipName(),
+            name: shipName,
             type: this.findShipType(),
             bpv: this.findBpv(),
             reference: this.findReference(),
@@ -134,8 +202,9 @@ export class SsdParser {
 
     toTitleCase(text: string): string {
         return text.toLowerCase().split(' ').map(word => {
-            if (word.match(/\w{1,3}\-\w{1,3}/)) return word.toUpperCase();
-            if (word === 'ISC') return 'ISC';
+            if (word.match(/(\w{1,3}\-\w{1,3}|\w+\d+\w+)/)) return word.toUpperCase();
+            if (word.toUpperCase() === 'ISC') return 'ISC';
+            if (word.toUpperCase() === 'PF') return 'PF';
             return word ? word.replace(word[0], word[0].toUpperCase()) : word;
         }).join(' ');
     }

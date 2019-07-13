@@ -23,11 +23,11 @@ export class GoogleDriveWalker {
 
     protected initializeTask: Promise<void> | undefined;
 
-    public async listFiles(): Promise<{id: string, name: string}[]> {
+    public async listFilesWithoutDescriptions(): Promise<{id: string, name: string}[]> {
         await this.ensureInitialized();
         return new Promise(resolve => {
             this.authorize(this.credentials, async (auth: any) => {
-                resolve(await this.doListFiles(auth));
+                resolve(await this.doListFilesWithoutDescriptions(auth));
             });
         });
     }
@@ -63,12 +63,12 @@ export class GoogleDriveWalker {
 
     }
 
-    async updateDescription(fileId: string, description: string) {
+    async updateMetadata(fileId: string, metadata: any) {
         await this.ensureInitialized();
         return new Promise((resolve, reject) => {
             this.authorize(this.credentials, async (auth: any) => {
                 try {
-                    resolve(await this.doUpdateDescription(auth, fileId, description));
+                    resolve(await this.doUpdateDescription(auth, fileId, metadata));
                 } catch (err) {
                     reject(err);
                 }
@@ -183,13 +183,13 @@ export class GoogleDriveWalker {
      * Lists the names and IDs of up to 10 files.
      * @param {google.auth.OAuth2} auth An authorized OAuth2 client.
      */
-    protected doListFiles(auth: any): Promise<{id: string, name: string}[]> {
+    protected doListFilesWithoutDescriptions(auth: any): Promise<{id: string, name: string}[]> {
         return new Promise( (resolve, reject) => {
             const outputFiles: {id: string, name: string}[] = [];
             const drive = new drive_v3.Drive({auth});
             drive.files.list({
-                pageSize: 500,
-                fields: 'nextPageToken, files(id, name, description)',
+                pageSize: 1000,
+                fields: 'nextPageToken, files(id, name, description, trashed)',
                 q: `'1lIYR8wW2b8Y0imogrRbzc1tR9t9M0dkY' in parents`,
                 orderBy: 'createdTime'
             }, (err: any, res) => {
@@ -199,14 +199,15 @@ export class GoogleDriveWalker {
                 }
                 const files = res.data.files;
                 if (files && files.length) {
-                    console.log('Files:');
+                    console.log(`Considering ${files.length} files.`);
                     let count = 0;
                     files.map((file) => {
-                        if (!file.description && file.id && file.name && file.name.indexOf('_') >= 0) {
-                            console.log(`${++count} ${file.name} (${file.id})`);
+                        if (!file.trashed && !file.description && file.id && file.name && file.name.indexOf('_') >= 0) {
+                            //console.log(`${++count} ${file.name} (${file.id})`);
                             outputFiles.push({id: file.id, name: file.name});
                         }
                     });
+                    console.log(`Processing ${outputFiles.length} files.`);
                     resolve(outputFiles);
                 } else {
                     reject(new Error('No files found.'));
@@ -215,9 +216,9 @@ export class GoogleDriveWalker {
         });
     }
 
-    protected async doUpdateDescription(auth: any, fileId: string, description: string): Promise<any> {
+    protected async doUpdateDescription(auth: any, fileId: string, metadata: any): Promise<any> {
         const drive = new drive_v3.Drive({auth});
-        const result = await drive.files.update({fileId, requestBody: { description }});
+        const result = await drive.files.update({fileId, requestBody: metadata});
         return result;
     }
 }

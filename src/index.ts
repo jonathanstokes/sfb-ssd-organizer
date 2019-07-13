@@ -9,14 +9,20 @@ const pdfParse = require('pdf-parse');
 
 class Parser {
 
-    async getDriveFiles() {
+    async processFilesWithoutDescriptions() {
         const walker = new GoogleDriveWalker();
-        const files = await walker.listFiles();
+        const files = await walker.listFilesWithoutDescriptions();
 
         for (const file of files) {
             //const file = await walker.getFileDetails(fileId);
-            //console.log('file=', JSON.stringify(file, null, 2));
+            //const fileMetadata = await walker.getFileDetails('1Vix9emdLZeLScykxGlkhf30WVLMhVljW');
+            //console.log('fileMetadata=', JSON.stringify(fileMetadata, null, 2));
             //return;
+
+            /*-* /
+            file.id = '1WVVHub8B7zMwQnJ4JPXUgELeRDjahpDD';
+            file.name = 'test_file.pdf';
+            /*+*/
 
             //console.log('downloading...');
             const downloadedFilename = await walker.downloadFile(file.id);
@@ -30,12 +36,23 @@ class Parser {
                     ssdMetadata = new SsdParser(pdfData.text).parseMetadata();
                     console.log(`${file.name} (${file.id}): ${JSON.stringify(ssdMetadata)}`);
                 } catch (err) {
-                    console.log(`Could not parse metadata for ${file.name}: ${err}`);
+                    console.error(`Could not parse metadata for ${file.name}: ${err}`);
+                    if (err.metadata) {
+                        const partialDescription = this.getDescription({name: '', ...err.metadata}, file.name);
+                        console.log(`Partial description for https://drive.google.com/file/d/${file.id}/view:\n${partialDescription}\n`);
+                    }
+                    break;
                 }
 
                 if (ssdMetadata) {
                     const description = this.getDescription(ssdMetadata, file.name);
-                    await walker.updateDescription(file.id, description);
+                    /*-* / break; /*+*/
+                    await walker.updateMetadata(file.id, {
+                        description,
+                        // properties: {
+                        //     shipName: ssdMetadata.name,
+                        // }
+                    });
                 }
             } finally {
                 fs.unlinkSync(downloadedFilename);
@@ -81,22 +98,23 @@ class Parser {
         let matches = /ssd_book_(\d+)_/.exec(fileName);
         if (matches) return `Commander's SSD Book #${matches[1]}`;
         matches = /module_(\w+)_ssd_book/.exec(fileName);
-        if (matches) return `Module ${matches[1]} - SSD Book`;
+        if (matches) return `Captain's Module ${matches[1].toUpperCase()} - SSD Book`;
         matches = /captains_basic_set_ssd_book/.exec(fileName);
         if (matches) return `Captain's Basic Set SSD Book`;
         matches = /captains_advanced_missions_ssd_book/.exec(fileName);
         if (matches) return `Captain's Advanced Missions SSD Book`;
         matches = /captains_module_(\w+)_ssd_book/.exec(fileName);
-        if (matches) return `Captain's Module ${matches[1]} SSD Book`;
+        if (matches) return `Captain's Module ${matches[1].toUpperCase()} SSD Book`;
         matches = /supplement_3_fast_patrol_ships/.exec(fileName);
         if (matches) return `Supplement #3 Fast Patrol Ships`;
-
+        matches = /ssd_sheets_commanders_volume_(\w+)_/.exec(fileName);
+        if (matches) return `SSD Sheets, Commander's Edition, Volume ${matches[1]}`;
         return undefined;
     }
 }
 
 try {
-    new Parser().getDriveFiles();
+    new Parser().processFilesWithoutDescriptions();
 } catch (err) {
     console.error(err);
 }
