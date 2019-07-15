@@ -4,6 +4,7 @@ export interface SsdMetadata {
     type?: string;
     bpv?: string;
     reference?: string;
+    book?: string;
 }
 
 export class SsdParser {

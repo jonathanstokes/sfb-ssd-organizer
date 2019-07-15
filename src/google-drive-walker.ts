@@ -32,6 +32,15 @@ export class GoogleDriveWalker {
         });
     }
 
+    public async listFilesAndDescriptions(): Promise<{id: string, name: string, description?: string}[]> {
+        await this.ensureInitialized();
+        return new Promise(resolve => {
+            this.authorize(this.credentials, async (auth: any) => {
+                resolve(await this.doListFilesAndDescriptions(auth));
+            });
+        });
+    }
+
     public async getFileDetails(fileId: string): Promise<any> {
         await this.ensureInitialized();
         return new Promise((resolve, reject) => {
@@ -167,7 +176,7 @@ export class GoogleDriveWalker {
                 }
             });
         } catch (err) {
-            console.error("Could not download file: ", err);
+            console.error("Could not download file: ", JSON.stringify(err));
             fs.unlinkSync(filePath);
             throw err;
         }
@@ -205,6 +214,43 @@ export class GoogleDriveWalker {
                         if (!file.trashed && !file.description && file.id && file.name && file.name.indexOf('_') >= 0) {
                             //console.log(`${++count} ${file.name} (${file.id})`);
                             outputFiles.push({id: file.id, name: file.name});
+                        }
+                    });
+                    console.log(`Processing ${outputFiles.length} files.`);
+                    resolve(outputFiles);
+                } else {
+                    reject(new Error('No files found.'));
+                }
+            });
+        });
+    }
+
+    /**
+     * Lists the names and IDs of up to 10 files.
+     * @param {google.auth.OAuth2} auth An authorized OAuth2 client.
+     */
+    protected doListFilesAndDescriptions(auth: any): Promise<{id: string, name: string, description?: string}[]> {
+        return new Promise( (resolve, reject) => {
+            const outputFiles: {id: string, name: string, description?: string}[] = [];
+            const drive = new drive_v3.Drive({auth});
+            drive.files.list({
+                pageSize: 1000,
+                fields: 'nextPageToken, files(id, name, description, trashed)',
+                q: `'1lIYR8wW2b8Y0imogrRbzc1tR9t9M0dkY' in parents`,
+                orderBy: 'createdTime'
+            }, (err: any, res) => {
+                if (err || !res) {
+                    reject('The API returned an error: ' + err);
+                    return;
+                }
+                const files = res.data.files;
+                if (files && files.length) {
+                    console.log(`Considering ${files.length} files.`);
+                    let count = 0;
+                    files.map((file) => {
+                        if (!file.trashed && file.id && file.name) {
+                            //console.log(`${++count} ${file.name} (${file.id})`);
+                            outputFiles.push({id: file.id, name: file.name, description: file.description});
                         }
                     });
                     console.log(`Processing ${outputFiles.length} files.`);
