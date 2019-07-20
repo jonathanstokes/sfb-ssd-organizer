@@ -54,13 +54,13 @@ export class GoogleDriveWalker {
         });
     }
 
-    public async downloadFile(fileId: string): Promise<string> {
+    public async downloadFile(fileId: string, fileName?: string): Promise<string> {
         await this.ensureInitialized();
         return new Promise((resolve, reject) => {
             try {
                 this.authorize(this.credentials, async (auth: any) => {
                     try {
-                        resolve(await this.doDownloadFile(auth, fileId));
+                        resolve(await this.doDownloadFile(auth, fileId, fileName));
                     } catch (err) {
                         reject(err);
                     }
@@ -111,7 +111,7 @@ export class GoogleDriveWalker {
      * @param {function} callback The callback to call with the authorized client.
      */
     protected authorize(credentials: any, callback: (auth: object) => void) {
-        const {client_secret, client_id, redirect_uris} = credentials.installed;
+        const {client_secret, client_id, redirect_uris} = credentials.web;
         const oAuth2Client = new google.auth.OAuth2(
             client_id, client_secret, redirect_uris[0]);
 
@@ -154,7 +154,7 @@ export class GoogleDriveWalker {
         });
     }
 
-    protected async doDownloadFile(auth: any, fileId: string): Promise<string> {
+    protected async doDownloadFile(auth: any, fileId: string, fileName?: string): Promise<string> {
         const drive = new drive_v3.Drive({auth});
         const filePath = path.join(os.tmpdir(), `${uuid.v4()}.pdf`);
         const destinationFile = fs.createWriteStream(filePath);
@@ -176,7 +176,7 @@ export class GoogleDriveWalker {
                 }
             });
         } catch (err) {
-            console.error("Could not download file: ", JSON.stringify(err));
+            console.error(`Could not download file ${fileName ? fileName + '(' + fileId + ')' : fileId}: `, JSON.stringify(err));
             fs.unlinkSync(filePath);
             throw err;
         }
@@ -246,10 +246,8 @@ export class GoogleDriveWalker {
                 const files = res.data.files;
                 if (files && files.length) {
                     console.log(`Considering ${files.length} files.`);
-                    let count = 0;
                     files.map((file) => {
-                        if (!file.trashed && file.id && file.name) {
-                            //console.log(`${++count} ${file.name} (${file.id})`);
+                        if (!file.trashed && file.id && file.name && file.name.indexOf('_') >= 0) {
                             outputFiles.push({id: file.id, name: file.name, description: file.description});
                         }
                     });

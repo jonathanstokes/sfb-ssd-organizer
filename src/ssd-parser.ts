@@ -4,6 +4,7 @@ export interface SsdMetadata {
     type?: string;
     bpv?: string;
     reference?: string;
+    scan?: string;
     book?: string;
 }
 
@@ -53,6 +54,12 @@ export class SsdParser {
         /\s+\d\s+/i,
         /BRIDGE/i,
         /CNTR/i,
+        /POINT\s+VALUE/i,
+        /BREAKDOWN/i,
+        /DAM\s+CON/i,
+        /WRP/i,
+        /IMP/i,
+        /HET\s+COST/i,
     ];
 
     protected static RACE_NAMES = [
@@ -74,11 +81,11 @@ export class SsdParser {
     protected static MISREAD_RACE_NAMES: { [correctName: string]: (string | RegExp)[]} = {
         'THOLIAN': ['THOLIFIN', 'THOLIRN', /THOL\s+IAN/, /THOLI\s+AN/, 'TIHOLIRN', 'THOILIRN'],
         'HYDRAN': ['HYDRFIN', 'HYDRRN', 'HYORRN'],
-        'ROMULAN': ['ROMULRN', 'ROMULFIN', 'ROMIARN', 'ROMUILAN', 'REIMULFIN'],
+        'ROMULAN': ['ROMULRN', 'ROMULFIN', 'ROMIARN', 'ROMUILAN', 'REIMULFIN', 'ROMILILRN'],
         'ANDROMEDAN': ['RNDROMEDRN', 'RNOROMEORN', 'ANDROMEOFIN', 'ANDROMEDFIN', 'ANDROMERN', 'FINDROMEDFIN', 'RNBROMEORN', 'FINDROMEDAN', 'FINDROMEOFIN', 'ANDROMEIORN'],
         'LYRAN': ['LYRRN', 'LYRFIN', 'LYFIFIN', 'LYRF1N', 'LYMAN'],
         'FEDERATION': ['FEDERFITION', 'FEDERRTION', 'FEDEFIRTION'],
-        'KLINGON': ['KILINGON'],
+        'KLINGON': ['KILINGON', 'KL1NGON'],
         'GORN': ['GOAN'],
         'KZINTI': ['KZINT1'],
     };

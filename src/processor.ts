@@ -15,7 +15,6 @@ export enum MetadataProperties {
 export const MetadataTitles: {[key: string]: string} = {
     'type': 'Type',
     'bpv': 'BPV',
-
     'reference': 'Ref',
     'book': 'Book'
 };
@@ -44,7 +43,7 @@ export class Processor {
 
                 const pdfData = await pdfParse(downloadedFilename);
 
-                let ssdMetadata;
+                let ssdMetadata: SsdMetadata;
                 try {
                     ssdMetadata = new SsdParser(pdfData.text).parseMetadata();
                     console.log(`${file.name} (${file.id}): ${JSON.stringify(ssdMetadata)}`);
@@ -73,35 +72,63 @@ export class Processor {
         }
     }
 
-    async updateAllDescriptions() {
+    async updateAllDescriptions(downloadPdfs = true) {
         const walker = new GoogleDriveWalker();
         const files = await walker.listFilesAndDescriptions();
 
+        /*-*/
+        const startIndex = 0;
+        let currentIndex = 0;
+        /*+*/
         for (const file of files) {
-            const downloadedFilename = await walker.downloadFile(file.id);
-            try {
-                const pdfData = await pdfParse(downloadedFilename);
-
-                let ssdMetadata;
-                try {
-                    ssdMetadata = new SsdParser(pdfData.text).parseMetadata();
-                    //console.log(`${file.name} (${file.id}): ${JSON.stringify(ssdMetadata)}`);
-                } catch (err) {
-                    console.error(`Could not parse metadata for ${file.name}: ${err}`);
-                }
-
-                if (ssdMetadata && file.description) {
-                    const existingDescriptionData = this.parseDescription(file.description);
-                    const updatedDescription = this.updateDescription(file.description, existingDescriptionData, ssdMetadata);
-                    if (updatedDescription) {
-                        await walker.updateMetadata(file.id, {
-                            description: updatedDescription,
-                        });
-                    }
-                }
-            } finally {
-                fs.unlinkSync(downloadedFilename);
+            /*-*/
+            if (currentIndex < startIndex) {
+                currentIndex++;
+                if (currentIndex % 50 === 0) console.log(`[${currentIndex}]`);
+                continue;
             }
+            /*+*/
+            let ssdMetadata: SsdMetadata;
+            if (downloadPdfs) {
+                const downloadedFilename = await walker.downloadFile(file.id, file.name);
+                try {
+                    const pdfData = await pdfParse(downloadedFilename);
+                    try {
+                        ssdMetadata = new SsdParser(pdfData.text).parseMetadata();
+                        //console.log(`${file.name} (${file.id}): ${JSON.stringify(ssdMetadata)}`);
+                    } catch (err) {
+                        // Sometimes the text is blank, as if OCR didn't work at all.
+                        // Also, if the manual description says "(General)", then our parsing methods don't work.
+                        // Also, if the title is too long, we don't need to note that.
+                        if (pdfData.text.trim().length && (!file.description || file.description.indexOf('(General)') < 0) && (!err.message || err.message.indexOf('is too long') >= 0)) {
+                            console.error(`[${currentIndex}] Could not parse metadata for ${file.name}: ${err}`);
+                        }
+                        ssdMetadata = {name: ''};
+                    }
+                } finally {
+                    fs.unlinkSync(downloadedFilename);
+                }
+            }
+            else {
+                ssdMetadata = {name: ''};
+            }
+
+            if (file.description) {
+                ssdMetadata.book = this.getBookFromFileName(file.name);
+                const existingDescriptionData = this.parseDescription(file.description);
+                const updatedDescription = this.updateDescription(file.description, existingDescriptionData, ssdMetadata);
+                if (updatedDescription) {
+                    /*-*/
+                    console.log(`==== [${currentIndex}] Updating description in ${file.name} from: ====\n${file.description}\n==== to ====\n${updatedDescription}\n============`);
+                    //continue;
+                    /*+*/
+                    await walker.updateMetadata(file.id, {
+                        description: updatedDescription,
+                    });
+                }
+            }
+
+            /*-*/ currentIndex++; /*+*/
         }
     }
 
@@ -154,7 +181,7 @@ export class Processor {
         let matches = /ssd_book_(\d+)_/.exec(fileName);
         if (matches) return `Commander's SSD Book #${matches[1]}`;
         matches = /module_(\w+)_ssd_book/.exec(fileName);
-        if (matches) return `Captain's Module ${matches[1].toUpperCase()} - SSD Book`;
+        if (matches) return `Captain's Module ${matches[1].toUpperCase()} SSD Book`;
         matches = /captains_basic_set_ssd_book/.exec(fileName);
         if (matches) return `Captain's Basic Set SSD Book`;
         matches = /captains_advanced_missions_ssd_book/.exec(fileName);
@@ -193,10 +220,12 @@ export class Processor {
         const bpv = bpvMatches && bpvMatches[1] || undefined;
         const refMatches = /^Ref:\s*(.*)$/gm.exec(description);
         const reference = refMatches && refMatches[1] || undefined;
+        const scanMatches = /^Scan:\s*(.*)$/gm.exec(description);
+        const scan = refMatches && refMatches[1] || undefined;
         const bookMatches = /^Book:\s*(.*)$/gm.exec(description);
         const book = bookMatches && bookMatches[1] || undefined;
         return {
-            name, type, bpv, reference, book
+            name, type, bpv, reference, scan, book
         };
     }
 
@@ -208,6 +237,15 @@ export class Processor {
             reference: /^(Book):\s*.*$/gm,
             book: null,
         };
+        // As a special-case, a given .book value replaces the existing value, so we can remove any existing value in that case.
+        if (updates.book) {
+            const bookRegex = /^Book:\s*.*$\n*/gm;
+            const existingBooks = output.match(bookRegex);
+            if (existingBooks) {
+                if (existingBooks.length > 1) throw new Error(`Cannot update "Book:" field when description contains more than one book:\n${description}`);
+                output = output.replace(bookRegex, '');
+            }
+        }
         for (const key of Object.values(MetadataProperties)) {
             if (updates[key]) {
                 const regex = insertionPoint[key];
@@ -233,6 +271,7 @@ export class Processor {
         for (const key of Object.keys(MetadataProperties)) {
             if (!(existingDescriptionData as any)[key] && ssdMetadata[key]) updates[key] = ssdMetadata[key];
         }
+        if (existingDescriptionData.book && ssdMetadata.book && existingDescriptionData.book !== ssdMetadata.book) updates.book = ssdMetadata.book;
         return Object.keys(updates).length ? this.applyUpdates(description, updates) : null;
     }
 }
